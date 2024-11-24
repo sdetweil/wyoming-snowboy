@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.2
+
+- change order of events to most frequent first, 
+- remove return False from AudioStop. as it kills this service, allows client to reconnect and resume
+- upgrade requirement.txt to wyoming 1.6.0
+
 ## 1.2.1
 
 - Use spaces in wake word phrase
