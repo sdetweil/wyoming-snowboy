@@ -252,13 +252,13 @@ class SnowboyEventHandler(AsyncEventHandler):
 
         elif AudioStop.is_type(event.type):
             # Inform client if not detections occurred
-            if not self.detected:
+            #if not self.detected:
                 # No wake word detections
-                await self.write_event(NotDetected().event())
+            await self.write_event(NotDetected().event())
 
-                _LOGGER.debug(
+            _LOGGER.debug(
                     "Audio stopped without detection from client: %s", self.client_id
-                )
+            )
 
         elif AudioStart.is_type(event.type):
             self.detected = False
