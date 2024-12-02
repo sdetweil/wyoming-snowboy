@@ -20,6 +20,7 @@ from . import __version__, snowboydetect
 _LOGGER = logging.getLogger()
 _DIR = Path(__file__).parent
 
+
 SAMPLES_PER_CHUNK: Final = 1024
 BYTES_PER_CHUNK: Final = SAMPLES_PER_CHUNK * 2  # 16-bit
 DEFAULT_KEYWORD: Final = "snowboy"
@@ -61,17 +62,25 @@ class State:
     def __init__(self, args: argparse.Namespace):
         self.args = args
 
+        logging.basicConfig(level=logging.DEBUG if self.args.debug else logging.INFO)        
+
     def get_detector(self, keyword_name: str) -> snowboydetect.SnowboyDetect:
         keyword: Optional[Keyword] = None
+        _LOGGER.debug("data =%s",str(self.args.data_dir) )
+        _LOGGER.debug("custom=%s", str(self.args.custom_model_dir))
         for kw_dir in self.args.custom_model_dir + [self.args.data_dir]:
             if not kw_dir.is_dir():
+                #_LOGGER.debug("skipping dir")
                 continue
 
+            _LOGGER.debug("kwdir is folder=%s", str(kw_dir) )
             for kw_path in itertools.chain(
                 kw_dir.glob("*.umdl"), kw_dir.glob("*.pmdl")
             ):
-                kw_name = kw_path.stem
-                if kw_name == keyword_name:
+                kw_name = str(kw_path.stem)
+                _LOGGER.debug("kwpath is =%s kwname='%s' == keyword_name='%s'", kw_path, kw_name, keyword_name)                
+                if str(kw_name) == str(keyword_name):
+                    _LOGGER.debug("found keyword=%s",kw_name)
                     keyword = Keyword(
                         name=kw_name,
                         model_path=kw_path,
@@ -128,7 +137,7 @@ async def main() -> None:
         help="Path to directory with default keywords",
     )
     parser.add_argument(
-        "--custom-model-dir",
+        "--custom_model_dir",
         action="append",
         default=[],
         help="Path to directory with custom wake word models (*.pmdl, *.umdl)",
@@ -158,10 +167,13 @@ async def main() -> None:
     _LOGGER.debug(args)
 
     if args.version:
-        print(__version__)
+        print(__version__)        
         return
 
     args.data_dir = Path(args.data_dir)
+    if args.custom_model_dir is None:
+       args.custom_model_dir = []
+       args.custom_model_dir.append(args.data_dir)
     args.custom_model_dir = [Path(p) for p in args.custom_model_dir]
 
     state = State(args=args)
@@ -223,6 +235,7 @@ class SnowboyEventHandler(AsyncEventHandler):
                 # Default keyword
                 self._load_keyword(DEFAULT_KEYWORD)
 
+            _LOGGER.debug("received  audiochunk")
             assert self.detector is not None
 
             chunk = AudioChunk.from_event(event)
@@ -239,6 +252,7 @@ class SnowboyEventHandler(AsyncEventHandler):
                     self.audio_buffer[:BYTES_PER_CHUNK]
                 )
                 if result_index > 0:
+                    self.detected = True;
                     _LOGGER.debug(
                         "Detected %s from client %s", self.keyword_name, self.client_id
                     )
@@ -247,38 +261,45 @@ class SnowboyEventHandler(AsyncEventHandler):
                             name=self.keyword_name, timestamp=chunk.timestamp
                         ).event()
                     )
-
+                    #self.audio_buffer = bytes()
+                    #return True
                 self.audio_buffer = self.audio_buffer[BYTES_PER_CHUNK:]
 
         elif AudioStop.is_type(event.type):
             # Inform client if not detections occurred
-            #if not self.detected:
+	        # if not self.detected:
                 # No wake word detections
             await self.write_event(NotDetected().event())
-
             _LOGGER.debug(
-                    "Audio stopped without detection from client: %s", self.client_id
+               "Audio stopped without detection from client: %s", self.client_id
             )
-
-        elif AudioStart.is_type(event.type):
-            self.detected = False
+            self.audio_buffer= bytes()
+            self.detected=False
+            return True
         elif Detect.is_type(event.type):
             detect = Detect.from_event(event)
             if detect.names:
                 # TODO: use all names
-                self._load_keyword(detect.names[0])
+                _LOGGER.debug("detector names passed=%s",detect.names[0] )
+                self._load_keyword(detect.names[0])                            
+        elif AudioStart.is_type(event.type):
+            _LOGGER.debug("received  audio start")
+            self.detected = False             
+
         elif Describe.is_type(event.type):
             wyoming_info = self._get_info()
             await self.write_event(wyoming_info.event())
             _LOGGER.debug("Sent info to client: %s", self.client_id)
-
+            return True                
+           
         else:
             _LOGGER.debug("Unexpected event: type=%s, data=%s", event.type, event.data)
 
         return True
 
     async def disconnect(self) -> None:
-        _LOGGER.debug("Client disconnected: %s", self.client_id)
+        _LOGGER.debug("Client disconnected: %s\n\n", self.client_id)
+        self.detected = False
 
     def _load_keyword(self, keyword_name: str):
         self.detector = self.state.get_detector(keyword_name)
